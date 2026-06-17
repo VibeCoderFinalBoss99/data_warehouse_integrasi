@@ -1,0 +1,139 @@
+TUNING PERFORMA YANG SUDAH DILAKUKAN
+
+Catatan ini hanya memuat perubahan yang langsung menjawab kelemahan performa pada file
+`sebelum_perubahan_web.txt`.
+
+1. Pagination pada endpoint GET
+
+   Kelemahan awal:
+   - Endpoint GET sebelumnya mengambil seluruh data sekaligus.
+   - Ini membuat response besar dan berat ketika jumlah data bertambah.
+
+   Tuning yang dilakukan:
+   - Endpoint GET sekarang memakai parameter `limit` dan `offset`.
+   - Jika client tidak mengirim parameter, sistem memakai limit default dari environment.
+   - Ada batas maksimal limit agar request tidak bisa meminta data terlalu banyak sekaligus.
+   - Query database berubah dari mengambil seluruh isi tabel menjadi mengambil sebagian data saja.
+
+   Dampak:
+   - Ukuran response menjadi lebih kecil.
+   - Beban database berkurang karena tidak semua baris dibaca dalam satu request.
+   - Transfer data ke client lebih ringan dan cepat.
+
+   Contoh:
+   - `/dim_sekolah?limit=50&offset=0`
+   - `/dim_sekolah?limit=20&offset=20`
+
+2. Pembatasan ukuran response
+
+   Kelemahan awal:
+   - Response GET bisa membesar tanpa batas jika data tabel makin banyak.
+   - Ini memengaruhi bandwidth, memory, dan waktu respon.
+
+   Tuning yang dilakukan:
+   - Response sekarang hanya berisi data sesuai batas pagination.
+   - Tidak ada pengiriman seluruh isi tabel secara default.
+   - Response juga diberi metadata kecil seperti `limit`, `offset`, dan `count` agar client tetap tahu konteks hasil.
+
+   Dampak:
+   - Payload lebih hemat.
+   - Client lebih mudah mengelola data bertahap.
+   - Risiko timeout berkurang saat data sudah banyak.
+
+3. Cache ringan untuk endpoint GET
+
+   Kelemahan awal:
+   - Data yang sering dibaca tetap selalu query ulang ke database.
+   - Untuk tabel referensi yang jarang berubah, ini boros sumber daya.
+
+   Tuning yang dilakukan:
+   - Dibuat cache in-memory menggunakan `Map`.
+   - Cache disimpan berdasarkan kombinasi tabel, limit, dan offset.
+   - Cache diberi TTL, jadi data tidak disimpan terlalu lama.
+   - Jika request GET yang sama datang lagi dalam TTL, response diambil dari cache, bukan query ulang ke database.
+
+   Dampak:
+   - Request berulang jadi jauh lebih ringan.
+   - Beban database turun pada data yang sering diakses.
+   - Sangat membantu saat pengujian banyak user membuka endpoint yang sama.
+
+   Catatan:
+   - Cache ini hanya hidup di instance runtime yang sama.
+   - Di Vercel, cache tidak bersifat global untuk semua instance.
+
+4. Cache invalidation saat data berubah
+
+   Kelemahan awal:
+   - Kalau cache ada, hasil GET bisa menjadi usang setelah data diubah.
+
+   Tuning yang dilakukan:
+   - Setelah `POST`, `PUT`, atau `DELETE`, cache untuk tabel terkait langsung dibersihkan.
+   - Dengan begitu, request GET berikutnya akan mengambil data terbaru.
+
+   Dampak:
+   - Data tetap konsisten.
+   - Cache tetap aman dipakai tanpa menampilkan hasil lama terlalu lama.
+
+5. Pengurangan overhead request database
+
+   Kelemahan awal:
+   - Setiap request berpotensi membuat beban koneksi tinggi.
+   - Hosting gratis dan serverless biasanya sensitif terhadap burst request.
+
+   Tuning yang dilakukan:
+   - Database connection pool dipakai agar koneksi dapat digunakan ulang.
+   - Jumlah koneksi dibatasi agar tidak terlalu agresif.
+   - Keep-alive diaktifkan supaya koneksi yang masih aktif bisa dipertahankan.
+   - Timeout idle dan jumlah koneksi idle juga ditata agar tidak boros.
+
+   Dampak:
+   - Koneksi tidak dibuat dari nol terus-menerus.
+   - Resource lebih hemat saat request datang bertubi-tubi.
+   - Lebih cocok untuk lingkungan hosting gratis dan serverless.
+
+6. Penyesuaian agar query lebih ringan saat testing
+
+   Kelemahan awal:
+   - Saat pengujian jumlah user dan endpoint meningkat, endpoint yang berat akan cepat terasa lambat.
+
+   Tuning yang dilakukan:
+   - Struktur endpoint dibuat sederhana dan fokus pada operasi inti.
+   - Query GET memakai pagination + cache, bukan full-table read terus-menerus.
+   - Helper dipusatkan supaya logika tidak tersebar dan tidak menambah overhead yang tidak perlu.
+
+   Dampak:
+   - Path utama request lebih cepat dieksekusi.
+   - Cocok untuk pengujian JMeter dengan request berulang.
+   - Mengurangi kemungkinan bottleneck dari sisi aplikasi.
+
+7. Parameter tuning dipindahkan ke environment
+
+   Kelemahan awal:
+   - Kalau tuning ditanam langsung di kode, perubahan performa jadi sulit diatur untuk tiap hosting.
+
+   Tuning yang dilakukan:
+   - Beberapa nilai performa dibuat configurable lewat environment:
+     - `API_DEFAULT_LIMIT`
+     - `API_MAX_LIMIT`
+     - `API_CACHE_TTL`
+     - `DB_CONNECTION_LIMIT`
+     - `DB_MAX_IDLE`
+     - `DB_IDLE_TIMEOUT`
+     - `DB_KEEPALIVE_DELAY`
+
+   Dampak:
+   - Lebih mudah menyesuaikan performa tanpa ubah kode.
+   - Bisa beda setting antara lokal, Vercel, dan environment lain.
+
+KESIMPULAN
+
+Tuning yang sudah dilakukan menutup kelemahan performa yang paling penting dari file sebelumnya:
+- GET yang terlalu berat
+- response yang terlalu besar
+- belum ada caching
+- koneksi database yang terlalu boros
+- request berulang yang membebani server
+
+Hasilnya, API sekarang lebih hemat resource dan lebih siap untuk pengujian beban,
+terutama pada hosting gratis dan environment serverless.
+

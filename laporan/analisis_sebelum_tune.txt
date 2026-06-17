@@ -1,0 +1,60 @@
+Analisis mengapa request JMeter awal berjalan baik lalu error meningkat setelah sekitar 100 request
+
+Konteks pengujian
+- Pengujian dilakukan pada web yang sudah dihosting, bukan di lokal.
+- Endpoint yang diuji adalah API CRUD PHP native dengan database MariaDB.
+- Hasil awal menunjukkan 100 request pertama berjalan baik tanpa error.
+- Setelah jumlah request bertambah, persentase error mulai naik.
+
+Kesimpulan singkat
+- Pola ini sangat khas untuk aplikasi yang awalnya masih sanggup melayani beban kecil, tetapi mulai melewati batas kapasitas hosting gratis, batas koneksi database, atau batas resource per periode waktu.
+- Karena gejalanya muncul setelah request tertentu, penyebabnya kemungkinan besar bukan bug logika endpoint tunggal, melainkan akumulasi beban runtime di sisi server hosting.
+
+Analisis detail penyebab yang paling mungkin
+
+1. Endpoint GET masih mengembalikan seluruh isi tabel
+- Saat endpoint dipanggil tanpa `id`, kode saat ini melakukan `SELECT *` lalu mengambil seluruh data.
+- Untuk tabel yang datanya banyak, response jadi besar, query jadi lebih berat, dan waktu eksekusi meningkat.
+- Pada hosting gratis, saat beberapa request paralel masuk bersamaan, pola ini cepat menimbulkan antrean proses.
+
+2. Tidak ada pagination
+- Tanpa pagination, setiap request list selalu memproses seluruh dataset.
+- Artinya beban per request tetap tinggi walaupun client hanya butuh sebagian data.
+- Pada pengujian JMeter, jika setiap virtual user terus mengakses list endpoint yang sama, beban DB dan bandwidth akan terus menumpuk.
+- Setelah jumlah request tertentu tercapai, latensi naik, lalu beberapa request timeout atau gagal.
+
+3. Tidak ada cache untuk data referensi
+- Tabel yang diuji adalah tabel dimensi, dan karakteristik tabel seperti ini biasanya jarang berubah.
+- Namun saat ini setiap request tetap memukul database.
+- Kalau request yang sama datang berulang-ulang, sistem membuang resource untuk membaca data yang sebenarnya sama berkali-kali.
+- Di hosting gratis, keterbatasan ini sangat terasa karena CPU dan I/O disk terbatas.
+
+4. Setiap request membuat koneksi database baru lewat PDO
+- Untuk model PHP native seperti ini, setiap request web biasanya membuka koneksi database baru.
+- Ini normal, tetapi di hosting gratis overhead koneksi bisa cukup terasa jika request datang rapat dan paralel.
+- Saat beban naik, biaya koneksi + eksekusi query + serialisasi JSON bisa melampaui kapasitas sementara server.
+
+5. Bandwidth dan serialisasi JSON ikut naik
+- Response JSON untuk endpoint list dikirim penuh.
+- Semakin banyak data, semakin besar payload yang dikirim ke client.
+- Saat JMeter mensimulasikan banyak user, bandwidth bisa menjadi bottleneck tambahan selain query database.
+
+Implikasi untuk tuning
+- Bottleneck utama ada di jalur baca data list dan pengulangan request.
+- Prioritas tuning paling efektif adalah:
+  1. pagination
+  2. cache ringan untuk GET
+  3. pengurangan beban response
+  4. pembatasan data per request
+  5. pengurangan query yang berulang
+
+Perubahan yang paling relevan untuk dilakukan sekarang
+- Tambahkan pagination pada endpoint GET.
+- Tambahkan cache file sederhana untuk GET list, terutama tabel dimensi yang jarang berubah.
+- Kurangi penggunaan `SELECT *` menjadi kolom yang memang dibutuhkan.
+- Sediakan metadata response agar client tahu total data dan halaman.
+
+Kesimpulan akhir
+- Error yang muncul setelah kira-kira 100 request sangat mungkin disebabkan oleh keterbatasan hosting gratis yang bertemu dengan pola akses API yang masih berat di sisi list GET.
+- Aplikasi saat ini fungsional, tetapi belum cukup dioptimalkan untuk beban bertubi-tubi.
+- Karena itu tuning yang paling masuk akal adalah mengurangi beban per request, bukan sekadar memperbaiki endpoint.

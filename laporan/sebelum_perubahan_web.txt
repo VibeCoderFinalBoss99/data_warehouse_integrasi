@@ -1,0 +1,34 @@
+Sisa kekurangan yang berkaitan dengan performa pada API saat ini
+
+1. Tidak ada pagination
+- Endpoint `GET` masih mengambil seluruh data sekaligus.
+- Jika jumlah data makin besar, response akan makin berat.
+- Hosting gratis biasanya cepat terasa lambat kalau data yang dikirim terlalu banyak.
+
+2. Masih menggunakan `SELECT *`
+- Setiap request membaca semua kolom dari tabel.
+- Ini sederhana, tetapi kurang efisien kalau nanti ada kolom tambahan yang tidak selalu dipakai.
+
+3. Belum ada caching
+- Data yang sering dibaca tetap selalu diambil dari database.
+- Untuk tabel referensi yang jarang berubah, cache ringan bisa mengurangi beban server.
+
+4. Belum ada ukuran response yang dibatasi
+- Endpoint `GET` bisa mengembalikan data sangat besar jika isi tabel bertambah.
+- Hal ini berdampak langsung ke bandwidth dan waktu respon.
+
+5. Belum ada metadata performa pada response
+- Response belum menampilkan informasi seperti:
+  - jumlah data
+  - halaman aktif
+  - total halaman
+  - waktu proses
+- Ini tidak wajib, tetapi berguna untuk menganalisis performa saat testing.
+
+Kesimpulan
+
+Yang masih perlu diperhatikan hanya sisi performa:
+- pagination
+- caching
+- pembatasan response
+- optimalisasi query dan beban request
